@@ -287,7 +287,6 @@ private struct MinimalConversationRow: View {
                 Text(item.title)
                     .font(.system(size: 11, weight: .medium))
                     .lineLimit(1)
-                    .help(item.title)
                 Text("\(item.model) · \(item.effort)")
                     .font(.system(size: 10))
                     .foregroundStyle(Color.codexMuted)
@@ -310,6 +309,7 @@ private struct MinimalConversationRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .background(RoundedRectangle(cornerRadius: 5).fill(Color.white.opacity(hovered ? 0.04 : 0)))
+        .help(item.title)
         .onHover { hovered = $0 }
     }
 }
