@@ -254,7 +254,7 @@ private struct MinimalConversationRow: View {
                 } label: { label }
                 .buttonStyle(.plain)
                 .accessibilityLabel("\(item.title), \(item.model), effort \(item.effort), \(item.status.label)")
-                .accessibilityHint(expanded ? "Replier" : "Déplier")
+                .help(item.title)
             }
             if expanded {
                 VStack(alignment: .leading, spacing: 0) {
