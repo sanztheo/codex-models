@@ -9,9 +9,9 @@ Codex Models is a read-only macOS menu bar monitor for local Codex threads. Its 
 The reader opens two SQLite files under the configured Codex directory:
 
 - `state_5.sqlite`: `threads` supplies names, titles, models, reasoning effort, source, archive state, and timestamps. `thread_spawn_edges` supplies parent/child relationships.
-- `thread_history_1.sqlite`: the latest `thread_turns` row supplies `inProgress`, `completed`, `interrupted`, or `failed`.
+- `thread_history_1.sqlite`: the latest `thread_turns` row supplies a fallback status: `inProgress`, `completed`, `interrupted`, or `failed`.
 
-Older `legacy` threads may not have a projected turn. For those threads, `session_index.jsonl` supplies the latest renamed title. If the history table has no state, the reader scans the end of the rollout log in 64 KiB blocks and accepts only lifecycle events: `task_started`, `task_complete`, `turn_aborted`, and `task_failed`.
+Older threads use `session_index.jsonl` for the latest renamed title. For every visible thread, including paginated threads and sub-agents, the reader scans the end of the rollout log in 64 KiB blocks and accepts only lifecycle events: `task_started`, `task_complete`, `turn_aborted`, and `task_failed`. The latest recognized journal event takes precedence over the history projection: after a resume, that projection can remain stuck on an older `inProgress` turn even after later turns finish. Missing, unreadable, or unrecognized journals retain the database fallback; without either source the status is unknown. No inactivity timeout guesses that a long-running task has finished.
 
 The reader opens SQLite with `SQLITE_OPEN_READONLY`, uses a short busy timeout, and keeps the metadata/edge read in one transaction. It never writes to Codex's databases.
 
@@ -54,5 +54,6 @@ The main app calls `SMAppService.mainApp.register()` on first launch, matching t
 - the reader cannot write to SQLite;
 - new-agent badge behavior follows `0 → 4 → 0 → 1 → 0` without duplicates or historical notifications;
 - legacy title renames and lifecycle state are recovered across a block boundary.
+- paginated journal completion overrides a stale running projection, updates the background count, and tracks subsequent starts, interruptions, and failures; missing journals preserve the database fallback.
 
 The displayed model is declared runtime metadata. It does not claim to prove server-side routing after a service-level reroute.

@@ -152,6 +152,33 @@ func runChecks() {
         precondition(legacy.title == "Renamed conversation")
         precondition(legacy.status == .completed, "Read lifecycle beyond a chunk boundary")
         precondition(legacy.filtered(showCompleted: false) == nil)
+        // A paginated projection can remain on an older inProgress turn after a resume.
+        let currentLog = directory.appendingPathComponent("current.jsonl")
+        try (lifecycle + noise).write(to: currentLog, atomically: true, encoding: .utf8)
+        try fixture("thread_history_1.sqlite", """
+            CREATE TABLE thread_turns (thread_id TEXT, rollout_ordinal INTEGER, status TEXT);
+            INSERT INTO thread_turns VALUES ('root',1,'completed'),('new1',1,'inProgress');
+            """)
+        try fixture("state_5.sqlite", """
+            UPDATE threads SET rollout_path='\(currentLog.path)' WHERE id='new1';
+            """)
+        let reconciled = try reader.load()[0]
+        precondition(reconciled.children.first { $0.id == "new1" }?.status == .completed,
+                     "Paginated child completion must override a stale inProgress projection")
+        precondition(reconciled.activeCount == 0, "Finished child must not inflate the running count")
+        waitUntil("journal completion reaches the background monitor") { monitor.activeCount == 0 }
+        try "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_started\"}}\n"
+            .write(to: currentLog, atomically: true, encoding: .utf8)
+        waitUntil("journal restart reaches the background monitor") { monitor.activeCount == 1 }
+        for (event, expected) in [("turn_aborted", RunStatus.interrupted), ("task_failed", .failed)] {
+            try "{\"type\":\"event_msg\",\"payload\":{\"type\":\"\(event)\"}}\n"
+                .write(to: currentLog, atomically: true, encoding: .utf8)
+            let child = try reader.load()[0].children.first { $0.id == "new1" }
+            precondition(child?.status == expected, "Latest journal lifecycle must decide the child status")
+        }
+        try FileManager.default.removeItem(at: currentLog)
+        let fallback = try reader.load()[0].children.first { $0.id == "new1" }
+        precondition(fallback?.status == .running, "Missing journal must preserve the database fallback")
         print("PASS: live models/states, legacy rename/status, archive/completed filters, recovery/read-only, new-agent badge 0→4→0→1→0")
     } catch {
         fputs("Checks failed: \(error.localizedDescription)\n", stderr)

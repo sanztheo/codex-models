@@ -106,7 +106,7 @@ final class CodexReader: @unchecked Sendable {
         _ = try database.rows("BEGIN")
         var threads = try database.rows("""
             SELECT id, name, title, model, reasoning_effort, agent_path, agent_nickname, archived, source,
-                   COALESCE(created_at_ms / 1000.0, created_at) AS created_at, rollout_path, history_mode
+                   COALESCE(created_at_ms / 1000.0, created_at) AS created_at, rollout_path
             FROM threads ORDER BY recency_at DESC, updated_at DESC, id
             """)
         let edges = try database.rows("SELECT parent_thread_id, child_thread_id FROM thread_spawn_edges")
@@ -136,9 +136,11 @@ final class CodexReader: @unchecked Sendable {
         }
         let visible = Self.tree(threads: threads, edges: edges, statuses: statuses)
         let visibleIDs = Set(visible.flatMap { [$0] + $0.descendants }.map(\.id))
-        for row in threads where row["history_mode"] == "legacy" {
-            if let id = row["id"], visibleIDs.contains(id), statuses[id] == nil, let path = row["rollout_path"] {
-                statuses[id] = legacyStatus(at: URL(fileURLWithPath: path))
+        // The history projection can lag behind resumed turns, including paginated threads.
+        for row in threads {
+            if let id = row["id"], visibleIDs.contains(id), let path = row["rollout_path"] {
+                let status = rolloutStatus(at: URL(fileURLWithPath: path))
+                if status != .unknown { statuses[id] = status }
             }
         }
         return Self.tree(threads: threads, edges: edges, statuses: statuses)
@@ -156,7 +158,7 @@ final class CodexReader: @unchecked Sendable {
         return titles
     }
 
-    private func legacyStatus(at url: URL) -> RunStatus {
+    private func rolloutStatus(at url: URL) -> RunStatus {
         guard let file = try? FileHandle(forReadingFrom: url) else { return .unknown }
         defer { try? file.close() }
         do {
