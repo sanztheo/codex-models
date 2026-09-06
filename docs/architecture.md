@@ -1,129 +1,56 @@
-# Données locales et invariants
+# Architecture and data invariants
 
-## Source
+## Purpose
 
-L'app lit deux bases SQLite dans le dossier Codex local :
+Codex Models is a read-only macOS menu bar monitor for local Codex threads. Its job is visibility: show which conversations exist, which sub-agents belong to them, what model and reasoning effort Codex recorded, and whether the latest run is active or finished.
 
-- `state_5.sqlite` : `threads` pour le nom, le modèle et l'effort ;
-  `thread_spawn_edges` pour les liens parent-enfant.
-- `thread_history_1.sqlite` : dernier `thread_turns` par `rollout_ordinal`, pour
-  l'état `inProgress`, `completed`, `interrupted` ou `failed`.
-- Pour les conversations `legacy`, `session_index.jsonl` fournit le dernier nom
-  si `threads.name` est vide. Sans tour dans la nouvelle table, le dernier événement
-  de cycle de vie du journal (`task_started`, `task_complete`, `turn_aborted`,
-  `task_failed`) fournit l'état. Le journal est parcouru depuis la fin par blocs
-  de 64 Kio ; le lecteur s'arrête au premier événement reconnu.
+## Local sources
 
-Ces schémas privés ont été vérifiés sur Codex CLI 0.153.4, app 26.901.41600.
-Une évolution incompatible doit afficher une erreur explicite ; ne pas inventer
-des données ni prendre la configuration globale comme modèle d'un enfant.
-L'absence de la base d'historique donne un état inconnu.
+The reader opens two SQLite files under the configured Codex directory:
 
-Les connexions utilisent `SQLITE_OPEN_READONLY` et un délai d'attente court.
-Une transaction de lecture regroupe les noms et les liens pour obtenir un arbre
-cohérent. Les modèles proviennent des métadonnées. Pour les anciens journaux,
-seuls les événements de cycle de vie sont exploités : les messages ne sont ni
-affichés ni enregistrés. Les titres peuvent contenir le texte choisi par Codex.
-Aucune donnée n'est exportée, stockée par l'app ou envoyée sur le réseau.
+- `state_5.sqlite`: `threads` supplies names, titles, models, reasoning effort, source, archive state, and timestamps. `thread_spawn_edges` supplies parent/child relationships.
+- `thread_history_1.sqlite`: the latest `thread_turns` row supplies `inProgress`, `completed`, `interrupted`, or `failed`.
 
-## Affichage
+Older `legacy` threads may not have a projected turn. For those threads, `session_index.jsonl` supplies the latest renamed title. If the history table has no state, the reader scans the end of the rollout log in 64 KiB blocks and accepts only lifecycle events: `task_started`, `task_complete`, `turn_aborted`, and `task_failed`.
 
-Les conversations interactives (`source=vscode` ou `cli`), non archivées et ayant
-un nom ou un titre, sont triées par récence. Les exécutions headless (`exec`) et
-les sessions encore vides ne polluent pas la liste. Ce filtre de source porte
-uniquement sur les racines. Le filtre d'archivage porte sur tous les niveaux :
-une conversation archivée et ses descendants ne sont jamais affichés.
-Le nom explicite a priorité
-sur le titre initial. Pour un enfant sans nom, le dernier segment d'`agent_path`
-sert de libellé. Les descendants sont dépliables, y compris sur plusieurs niveaux.
-Un cycle de liens est coupé au parcours, sans boucle infinie.
+The reader opens SQLite with `SQLITE_OPEN_READONLY`, uses a short busy timeout, and keeps the metadata/edge read in one transaction. It never writes to Codex's databases.
 
-L'arête `status=open` signifie que l'enfant reste ouvert, pas qu'il travaille :
-elle n'intervient jamais dans l'état affiché. Seul le dernier tour enregistré
-détermine cet état. Après un crash, cet enregistrement peut être périmé ; l'app
-ne tente pas de déduire l'activité à partir d'une date ou d'un nom de modèle.
+## Tree and filtering rules
 
-Le chargement s'effectue en arrière-plan sur une file série. L'app rafraîchit
-les données chaque seconde, dès son lancement et même lorsque le panneau est
-fermé. Une lecture déjà en cours empêche l'empilement de requêtes. Seul un arbre
-modifié est republié, pour préserver les dépliages et ne pas rejouer les animations.
-Les champs modèle/effort absents sont affichés « Non fourni ».
+Only named, non-archived interactive roots (`source=vscode` or `source=cli`) appear in the main list. Headless executions and empty sessions are omitted from the root list. Every archived node is removed at every depth, including archived children attached to a visible parent. Cycles in the edge table are cut during traversal.
 
-Le filtre « Afficher les terminées » est mémorisé localement. Quand il est éteint,
-les feuilles `completed` disparaissent ; leur parent reste visible si un autre
-descendant est encore consultable. Les archives restent exclues dans les deux cas.
-Le compteur d'activité additionne les tours `inProgress` de l'arbre non archivé,
-indépendamment du filtre. Il ne représente ni un quota ni un pourcentage d'avancement.
+The explicit conversation name wins over the initial title. A nameless sub-agent falls back to the final component of `agent_path`, then to its nickname, then to `Untitled conversation`.
 
-La présentation est volontairement minimale : fond sombre, lignes compactes et
-icône principale monochrome fixe. Les lignes en cours ont un spinner orange de
-9 points à gauche ; « Terminé » est accompagné d'une coche verte à droite.
-Le spinner devient statique lorsque macOS demande une réduction des animations.
-Le dépliage et le filtrage utilisent une transition courte.
+The completed toggle filters only non-archived `completed` leaves. A completed parent stays visible when it still contains a visible child, so active work never loses its context. Unknown, interrupted, and failed states remain visible.
 
-## Nouveaux sous-agents
+## Live monitoring
 
-Le premier relevé réussi initialise les identifiants connus sans créer de badge.
-Les relevés suivants comptent les nouveaux descendants dont la date de création
-est postérieure au démarrage du suivi (`created_at_ms`, ou `created_at` en repli).
-Le retour d'une vieille conversation ne constitue donc pas un nouveau lancement.
-Les identifiants déjà vus sont conservés pour éviter de recompter un même agent.
+`ConversationsModel` starts its serial background reader at initialization and refreshes once per second, even while the menu bar panel is closed. A read already in flight prevents another read from stacking. The published tree changes only when the snapshot changes, preserving expansion state and avoiding unnecessary UI transitions.
 
-La cloche et son nombre apparaissent dans le libellé natif de la barre de menus.
-L'ouverture du panneau et son retour au premier plan acquittent le badge ; une
-cloche cliquable dans l'en-tête permet aussi d'acquitter des arrivées pendant la
-consultation. Les éléments archivés sont retirés du badge. L'acquittement ne
-modifie ni les conversations ni leur archivage. Ce compteur n'est pas persistant :
-un redémarrage recommence sur une base vide. Aucune notification système n'est émise.
+The first successful snapshot establishes the known sub-agent IDs without creating a notification. Later descendants whose creation timestamp is after monitor startup become unread new-agent IDs. Acknowledgement clears the badge; archived IDs are removed from it. The badge is intentionally session-scoped and does not persist across launches.
 
-## Positionnement natif
+## UI and positioning
 
-Le mécanisme reprend celui de
-[Performance Viewer](https://github.com/sanztheo/PerformanceViewer/blob/da96cbe133bcfceaa6bf7a769128f91860d28dc1/Performance/PerformanceApp.swift) :
-`MenuBarExtra` avec `.menuBarExtraStyle(.window)`. Le système possède l'ancrage,
-le placement et le redimensionnement de la fenêtre. Aucun `NSStatusItem`,
-`NSPopover` ou calcul de coordonnées ne reste dans Codex Models.
+The interface uses SwiftUI `MenuBarExtra` with `.menuBarExtraStyle(.window)`, the same native presentation pattern used by [Performance Viewer](https://github.com/sanztheo/PerformanceViewer/blob/da96cbe133bcfceaa6bf7a769128f91860d28dc1/Performance/PerformanceApp.swift). macOS owns anchoring, placement, and window sizing; Codex Models does not calculate popover coordinates or manage an `NSStatusItem`/`NSPopover` pair.
 
-Comme dans `MenuBarPopover.swift` de Performance Viewer, seule la largeur globale
-est fixée (330 points). Chaque ligne fait exactement 44 points ; la liste réserve
-cette hauteur pour chaque élément déplié, puis devient défilante au-delà de
-300 points. La fenêtre native déduit sa taille de cette vue, sans synchronisation
-manuelle avec un contrôleur AppKit.
+The panel is intentionally compact: 330 points wide, fixed 44-point rows, and a scrollable list beyond 300 points. Running rows show a small orange spinner on the left. Completed rows show a green checkmark on the right. The main menu bar icon remains fixed; only the row spinner animates, and it pauses when Reduce Motion is enabled.
 
-Cette migration supprime le décalage entre les dimensions du popover manuel et
-celles de la vue hébergée, qui pouvait pousser le panneau hors écran ou couper
-des lignes. Les anciens contrôles `--open-panel` et `--check-panel`, liés à ce
-popover manuel, sont supprimés. Le suivi des données reste indépendant de
-l'ouverture du panneau.
+## Login item
 
-## Vérification
+The main app calls `SMAppService.mainApp.register()` on first launch, matching the native macOS login-item mechanism used by Performance Viewer. Users can disable it in System Settings → General → Login Items.
 
-`--check` crée des bases temporaires et vérifie la hiérarchie, le titre renommé,
-le modèle et l'effort propres à l'enfant, le passage en cours → terminé malgré
-une arête toujours ouverte, l'exclusion des racines et enfants archivés, le filtre
-des éléments terminés avec conservation d'un parent d'enfant actif, l'état manquant
-et le refus effectif d'une écriture par le lecteur SQLite.
-Il vérifie également le badge `0 → 4 → 0 → 1 → 0`, l'absence de doublons,
-l'exclusion de l'historique, l'acquittement et le retrait des archives.
-Le cas ancien vérifie un renommage successif dans l'index et un événement de fin
-retrouvé au-delà d'une frontière de bloc, puis son exclusion par le filtre des
-terminées. Un état inconnu reste affiché comme tel, sans être assimilé à une fin.
+## Verification
 
-Le test réel consiste à observer un enfant de cette conversation en cours puis
-terminé, en comparant les valeurs affichées avec les mêmes métadonnées locales.
-L'affichage ne dépend pas du hook `SubagentStart`, dont les événements n'étaient
-pas correctement rendus par l'app Codex lors du test précédent.
-Ce hook expérimental, sa déclaration et son état de confiance ont été retirés
-après remplacement par l'app. Les autres hooks restent inchangés.
+`--check` builds temporary SQLite fixtures and verifies:
 
-Validation réelle : `test_hook_luna` sous la conversation de construction a été
-lu en `gpt-5.6-luna`, effort `max`, d'abord `running` puis `completed`. Son parent
-est enregistré en `gpt-6-astra`, effort `high`. Le dépliage de la vue SwiftUI a
-été vérifié par l'interface d'accessibilité et visuellement sur les vraies données.
+- hierarchy, names, models, and reasoning effort;
+- running → completed updates while the panel is closed;
+- archived roots and children are hidden;
+- completed filtering preserves active descendants;
+- missing history produces `Unknown` instead of an invented state;
+- read errors surface and recover automatically;
+- the reader cannot write to SQLite;
+- new-agent badge behavior follows `0 → 4 → 0 → 1 → 0` without duplicates or historical notifications;
+- legacy title renames and lifecycle state are recovered across a block boundary.
 
-Interface native SwiftUI ; `LSUIElement` masque l'icône du Dock.
-
-Le 6 septembre 2026, la vue native a été vérifiée sur les données locales : les
-trois conversations tiennent entièrement dans la fenêtre ; déplier l'enfant Luna
-agrandit la fenêtre et affiche les quatre lignes sans en couper une. Le contrôle
-`--check` et la vérification de signature passent après migration.
+The displayed model is declared runtime metadata. It does not claim to prove server-side routing after a service-level reroute.
