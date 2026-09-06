@@ -35,7 +35,7 @@ The interface uses SwiftUI `MenuBarExtra` with `.menuBarExtraStyle(.window)`, th
 
 The panel is intentionally compact: 330 points wide, fixed 44-point rows, and a scrollable list beyond 300 points. Running rows show a small orange spinner on the left. Completed rows show a green checkmark on the right. The main menu bar icon remains fixed; only the row spinner animates, and it pauses when Reduce Motion is enabled.
 
-Hovering a conversation row reveals its complete title. Expandable rows attach the help text to the button itself: an accessibility hint such as "Expand" otherwise overrides the title tooltip. Leaf rows expose the same help on their label; model metadata retains its own tooltip.
+Conversation titles use an explicit hover popover, rather than relying on the macOS help-tooltip delay. After 400 ms over a row, a compact light bubble shows the complete title with multiline wrapping. Leaving the row cancels the pending display or dismisses the bubble; removing the row dismisses it as well. The same row implementation handles parents and nested sub-agents. Model metadata retains its native help text.
 
 ## Login item
 

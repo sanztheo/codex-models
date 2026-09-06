@@ -240,6 +240,7 @@ private struct MinimalConversationRow: View {
     let item: Conversation
     @Binding var expandedIDs: Set<String>
     @State private var hovered = false
+    @State private var showTitle = false
 
     private var expanded: Bool { expandedIDs.contains(item.id) }
 
@@ -254,7 +255,6 @@ private struct MinimalConversationRow: View {
                 } label: { label }
                 .buttonStyle(.plain)
                 .accessibilityLabel("\(item.title), \(item.model), effort \(item.effort), \(item.status.label)")
-                .help(item.title)
             }
             if expanded {
                 VStack(alignment: .leading, spacing: 0) {
@@ -309,8 +309,30 @@ private struct MinimalConversationRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .background(RoundedRectangle(cornerRadius: 5).fill(Color.white.opacity(hovered ? 0.04 : 0)))
-        .help(item.title)
         .onHover { hovered = $0 }
+        .task(id: hovered) {
+            guard hovered else {
+                showTitle = false
+                return
+            }
+            do { try await Task.sleep(nanoseconds: 400_000_000) }
+            catch { return }
+            guard !Task.isCancelled else { return }
+            showTitle = true
+        }
+        .popover(isPresented: $showTitle, attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
+            Text(item.title)
+                .font(.system(size: 11))
+                .foregroundStyle(Color(white: 0.12))
+                .lineLimit(nil)
+                .frame(idealWidth: 260, maxWidth: 300, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(Color(white: 0.96))
+                .environment(\.colorScheme, .light)
+        }
+        .onDisappear { showTitle = false }
     }
 }
 
