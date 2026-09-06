@@ -34,6 +34,7 @@ Depuis ce dossier, sur un Mac avec les outils de développement Apple :
 ```sh
 bash build.sh
 "../Codex Models.app/Contents/MacOS/CodexModels" --check
+bash Scripts/install-to-applications.sh
 ```
 
 La compilation crée une app signée localement à côté de ce dossier. Il n'y a pas
@@ -41,6 +42,8 @@ d'installation ni de démarrage automatique. La signature locale convient à ce
 Mac ; elle n'est pas une notarisation Apple pour distribuer l'app à d'autres Macs.
 
 L'option `--preview` ouvre la même interface dans une fenêtre de test.
+Le script `Scripts/install-to-applications.sh` copie le bundle dans `/Applications`
+et le lance, ce qui le rend facilement trouvable par Spotlight.
 Le panneau utilise le même `MenuBarExtra` natif que Performance Viewer : macOS
 gère sa position sous l'icône et son redimensionnement. Sa largeur est de 330
 points ; les lignes de 44 points restent entièrement visibles et la liste devient
