@@ -11,6 +11,10 @@ Ouvrir `Codex Models.app`, puis cliquer sur l'icône dans la barre de menus.
 Déplier une conversation pour voir ses sous-agents. L'activité s'actualise chaque
 seconde, même quand le panneau est fermé. Le bouton Quitter ferme l'app.
 
+Au premier lancement, l'app s'enregistre comme élément d'ouverture de session
+macOS, comme Performance Viewer. Tu peux le désactiver dans Réglages Système →
+Général → Ouverture et extensions.
+
 Les conversations et les sous-agents archivés sont toujours exclus.
 « Afficher les terminées » montre les éléments terminés non archivés ; le choix
 est mémorisé. Un parent terminé reste visible si un de ses enfants travaille.

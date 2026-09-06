@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 import SwiftUI
 
 private let panelWidth: CGFloat = 330
@@ -331,6 +332,12 @@ private struct RunningSpinner: View {
 // Same window presentation as PerformanceViewer/PerformanceApp.swift.
 struct CodexModelsApp: App {
     @StateObject private var model = ConversationsModel()
+
+    init() {
+        if SMAppService.mainApp.status != .enabled {
+            try? SMAppService.mainApp.register()
+        }
+    }
 
     var body: some Scene {
         MenuBarExtra {
