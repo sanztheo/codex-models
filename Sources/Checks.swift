@@ -84,6 +84,15 @@ func runChecks() {
         try fixture("thread_history_1.sqlite", "UPDATE thread_turns SET status='inProgress' WHERE thread_id='child';")
         let parentOfActiveChild = try reader.load()[0]
         precondition(parentOfActiveChild.status == .completed)
+        precondition(parentOfActiveChild.filtered(showCompleted: false).first?.parentTitle == "Conversation renommée",
+                     "Promoted children must retain their original parent title")
+        let link = parentOfActiveChild
+        let validLink = Conversation(id: "00000000-0000-0000-0000-000000000001", title: "Link",
+                                     model: "test", effort: "test", status: .running, createdAt: 0, children: [])
+        precondition(validLink.codexURL?.absoluteString == "codex://threads/00000000-0000-0000-0000-000000000001",
+                     "Task links must use the installed Codex thread route")
+        precondition(link.codexURL == nil, "Invalid task IDs must not create navigation URLs")
+
         precondition(parentOfActiveChild.filtered(showCompleted: false).map(\.id) == ["child"],
                      "Hide completed parents while promoting their active children")
         precondition(parentOfActiveChild.filtered(showCompleted: true).first == parentOfActiveChild,
@@ -185,11 +194,30 @@ func runChecks() {
         try "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_started\"}}\n"
             .write(to: currentLog, atomically: true, encoding: .utf8)
         waitUntil("journal restart reaches the background monitor") { monitor.activeCount == 1 }
+        for timestamp in ["2026-09-07T15:00:00.000Z", "2026-09-07T15:00:00Z"] {
+            let record: [String: Any] = ["type": "event_msg", "timestamp": timestamp,
+                                         "payload": ["type": "task_started"]]
+            try JSONSerialization.data(withJSONObject: record).write(to: currentLog)
+            let timed = try reader.load()[0].children.first { $0.id == "new1" }!
+            precondition(timed.turnStartedAt == Date(timeIntervalSince1970: 1_788_793_200),
+                         "Current turn duration must use the journal start timestamp")
+        }
+        let resumedRecord: [String: Any] = ["type": "event_msg", "timestamp": "2026-09-07T15:01:00Z",
+                                           "payload": ["type": "task_started"]]
+        try JSONSerialization.data(withJSONObject: resumedRecord).write(to: currentLog)
+        let resumed = try reader.load()[0].children.first { $0.id == "new1" }
+        precondition(resumed?.turnStartedAt == Date(timeIntervalSince1970: 1_788_793_260),
+                     "A new turn must reset its duration rather than reuse the previous start")
+        try Data("{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_started\"}}".utf8).write(to: currentLog)
+        let untimed = try reader.load()[0].children.first { $0.id == "new1" }
+        precondition(untimed?.turnStartedAt == nil,
+                     "Missing start timestamps must not invent a duration")
         for (event, expected) in [("turn_aborted", RunStatus.interrupted), ("task_failed", .failed)] {
             try "{\"type\":\"event_msg\",\"payload\":{\"type\":\"\(event)\"}}\n"
                 .write(to: currentLog, atomically: true, encoding: .utf8)
             let child = try reader.load()[0].children.first { $0.id == "new1" }
             precondition(child?.status == expected, "Latest journal lifecycle must decide the child status")
+            precondition(child?.turnStartedAt == nil, "Stopped turns must clear the running timer")
         }
         try FileManager.default.removeItem(at: currentLog)
         let fallback = try reader.load()[0].children.first { $0.id == "new1" }

@@ -33,6 +33,13 @@ struct Conversation: Identifiable, Sendable, Equatable {
     let status: RunStatus
     let createdAt: TimeInterval
     var children: [Conversation]
+    var parentTitle: String? = nil
+    var turnStartedAt: Date? = nil
+
+    var codexURL: URL? {
+        guard UUID(uuidString: id) != nil else { return nil }
+        return URL(string: "codex://threads/\(id)")
+    }
 
     var descendants: [Conversation] {
         children.flatMap { [$0] + $0.descendants }
@@ -121,6 +128,7 @@ final class CodexReader: @unchecked Sendable {
         }
 
         var statuses: [String: RunStatus] = [:]
+        var turnStarts: [String: Date] = [:]
         let historyURL = directory.appendingPathComponent("thread_history_1.sqlite")
         if FileManager.default.fileExists(atPath: historyURL.path) {
             let history = try ReadDatabase(historyURL)
@@ -139,11 +147,12 @@ final class CodexReader: @unchecked Sendable {
         // The history projection can lag behind resumed turns, including paginated threads.
         for row in threads {
             if let id = row["id"], visibleIDs.contains(id), let path = row["rollout_path"] {
-                let status = rolloutStatus(at: URL(fileURLWithPath: path))
-                if status != .unknown { statuses[id] = status }
+                let event = rolloutStatus(at: URL(fileURLWithPath: path))
+                if event.status != .unknown { statuses[id] = event.status }
+                turnStarts[id] = event.startedAt
             }
         }
-        return Self.tree(threads: threads, edges: edges, statuses: statuses)
+        return Self.tree(threads: threads, edges: edges, statuses: statuses, turnStarts: turnStarts)
     }
 
     private func legacyTitles() -> [String: String] {
@@ -158,8 +167,8 @@ final class CodexReader: @unchecked Sendable {
         return titles
     }
 
-    private func rolloutStatus(at url: URL) -> RunStatus {
-        guard let file = try? FileHandle(forReadingFrom: url) else { return .unknown }
+    private func rolloutStatus(at url: URL) -> (status: RunStatus, startedAt: Date?) {
+        guard let file = try? FileHandle(forReadingFrom: url) else { return (.unknown, nil) }
         defer { try? file.close() }
         do {
             var offset = try file.seekToEnd()
@@ -177,22 +186,28 @@ final class CodexReader: @unchecked Sendable {
                           record["type"] as? String == "event_msg",
                           let payload = record["payload"] as? [String: Any] else { continue }
                     switch payload["type"] as? String {
-                    case "task_complete": return .completed
-                    case "task_started": return .running
-                    case "turn_aborted": return .interrupted
-                    case "task_failed": return .failed
+                    case "task_complete": return (.completed, nil)
+                    case "task_started":
+                        let formatter = ISO8601DateFormatter()
+                        let timestamp = record["timestamp"] as? String ?? ""
+                        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                        let fractional = formatter.date(from: timestamp)
+                        formatter.formatOptions = [.withInternetDateTime]
+                        return (.running, fractional ?? formatter.date(from: timestamp))
+                    case "turn_aborted": return (.interrupted, nil)
+                    case "task_failed": return (.failed, nil)
                     default: continue
                     }
                 }
                 partial = start > 0 ? Data(lines.first ?? Data.SubSequence()) : Data()
                 offset = start
             }
-        } catch { return .unknown }
-        return .unknown
+        } catch { return (.unknown, nil) }
+        return (.unknown, nil)
     }
 
     static func tree(threads: [[String: String]], edges: [[String: String]],
-                     statuses: [String: RunStatus]) -> [Conversation] {
+                     statuses: [String: RunStatus], turnStarts: [String: Date] = [:]) -> [Conversation] {
         let records = Dictionary(threads.compactMap { row in
             row["id"].map { ($0, row) }
         }, uniquingKeysWith: { first, _ in first })
@@ -210,7 +225,7 @@ final class CodexReader: @unchecked Sendable {
             }
         }
 
-        func make(_ id: String, ancestors: Set<String>) -> Conversation? {
+        func make(_ id: String, ancestors: Set<String>, parentTitle: String? = nil) -> Conversation? {
             guard !ancestors.contains(id), let row = records[id], row["archived"] != "1" else { return nil }
             func value(_ key: String) -> String? {
                 guard let text = row[key]?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -225,7 +240,8 @@ final class CodexReader: @unchecked Sendable {
                 effort: value("reasoning_effort") ?? "Non fourni",
                 status: statuses[id] ?? .unknown,
                 createdAt: Double(row["created_at"] ?? "") ?? 0,
-                children: (childIDs[id] ?? []).compactMap { make($0, ancestors: ancestors.union([id])) }
+                children: (childIDs[id] ?? []).compactMap { make($0, ancestors: ancestors.union([id]), parentTitle: title) },
+                parentTitle: parentTitle, turnStartedAt: turnStarts[id]
             )
         }
         return threads.compactMap { row in

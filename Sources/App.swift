@@ -3,7 +3,7 @@ import ServiceManagement
 import SwiftUI
 
 private let panelWidth: CGFloat = 330
-private let rowHeight: CGFloat = 44
+private let rowHeight: CGFloat = 56
 
 private func defaultCodexDirectory() -> URL {
     if let configured = ProcessInfo.processInfo.environment["CODEX_HOME"], !configured.isEmpty {
@@ -246,16 +246,7 @@ private struct MinimalConversationRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if item.children.isEmpty {
-                label
-            } else {
-                Button {
-                    if expanded { expandedIDs.remove(item.id) }
-                    else { expandedIDs.insert(item.id) }
-                } label: { label }
-                .buttonStyle(.plain)
-                .accessibilityLabel("\(item.title), \(item.model), effort \(item.effort), \(item.status.label)")
-            }
+            label
             if expanded {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(item.children) { child in
@@ -273,20 +264,46 @@ private struct MinimalConversationRow: View {
 
     private var label: some View {
         HStack(alignment: .center, spacing: 7) {
-            Image(systemName: "chevron.right")
-                .font(.system(size: 8, weight: .medium))
-                .rotationEffect(.degrees(expanded ? 90 : 0))
-                .opacity(item.children.isEmpty ? 0 : 0.5)
-                .frame(width: 8)
+            Button {
+                if expanded { expandedIDs.remove(item.id) }
+                else { expandedIDs.insert(item.id) }
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 8, weight: .medium))
+                    .rotationEffect(.degrees(expanded ? 90 : 0))
+                    .frame(width: 12, height: 32)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .opacity(item.children.isEmpty ? 0 : 0.5)
+            .disabled(item.children.isEmpty)
+            .accessibilityLabel("\(expanded ? "Replier" : "Déplier") les sous-agents de \(item.title)")
             if item.status == .running {
                 RunningSpinner()
             } else {
                 Color.clear.frame(width: 9, height: 9)
             }
             VStack(alignment: .leading, spacing: 3) {
-                Text(item.title)
-                    .font(.system(size: 11, weight: .medium))
-                    .lineLimit(1)
+                Button {
+                    showTitle = false
+                    if let url = item.codexURL { NSWorkspace.shared.open(url) }
+                } label: {
+                    Text(item.title)
+                        .font(.system(size: 11, weight: .medium))
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(item.codexURL == nil)
+                .accessibilityLabel("Ouvrir \(item.title) dans Codex")
+                if let parent = item.parentTitle {
+                    Text("↳ \(parent)")
+                        .font(.system(size: 9))
+                        .foregroundStyle(Color.codexMuted)
+                        .lineLimit(1)
+                        .help("Tâche parente : \(parent)")
+                }
                 Text("\(item.model) · \(item.effort)")
                     .font(.system(size: 10))
                     .foregroundStyle(Color.codexMuted)
@@ -297,7 +314,15 @@ private struct MinimalConversationRow: View {
             HStack(spacing: 3) {
                 if item.status == .completed { Image(systemName: "checkmark") }
                 if item.status == .failed { Image(systemName: "exclamationmark.triangle") }
-                Text(item.status.label)
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text(item.status.label)
+                    if item.status == .running, let start = item.turnStartedAt {
+                        Text(start, style: .timer)
+                            .monospacedDigit()
+                            .foregroundStyle(Color.codexMuted)
+                            .help("Durée depuis le début du tour en cours")
+                    }
+                }
             }
             .font(.system(size: 9))
             .foregroundStyle(item.status == .completed ? Color.codexGreen :

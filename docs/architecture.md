@@ -33,9 +33,19 @@ The first successful snapshot establishes the known sub-agent IDs without creati
 
 The interface uses SwiftUI `MenuBarExtra` with `.menuBarExtraStyle(.window)`, the same native presentation pattern used by [Performance Viewer](https://github.com/sanztheo/PerformanceViewer/blob/da96cbe133bcfceaa6bf7a769128f91860d28dc1/Performance/PerformanceApp.swift). macOS owns anchoring, placement, and window sizing; Codex Models does not calculate popover coordinates or manage an `NSStatusItem`/`NSPopover` pair.
 
-The panel is intentionally compact: 330 points wide, fixed 44-point rows, and a scrollable list beyond 300 points. Running rows show a small orange spinner on the left. Completed rows show a green checkmark on the right. The main menu bar icon remains fixed; only the row spinner animates, and it pauses when Reduce Motion is enabled.
+The panel is intentionally compact: 330 points wide, fixed 56-point rows, and a scrollable list beyond 300 points. Running rows show a small orange spinner on the left. Completed rows show a green checkmark on the right. The main menu bar icon remains fixed; only the row spinner animates, and it pauses when Reduce Motion is enabled.
 
 Conversation titles use an explicit hover popover, rather than relying on the macOS help-tooltip delay. After 400 ms over a row, a compact light bubble shows the complete title with multiline wrapping. Leaving the row cancels the pending display or dismisses the bubble; removing the row dismisses it as well. The same row implementation handles parents and nested sub-agents. Model metadata retains its native help text.
+
+## Task navigation and running duration
+
+Clicking a title opens `codex://threads/<UUID>` through macOS, using the thread-link route emitted by the installed Codex app. Invalid identifiers disable navigation. The separate chevron only expands or collapses children. No conversation data is sent to a web service.
+
+Every child retains its direct parent's resolved title before filtering, including when a stopped parent is hidden and the child is promoted. The parent appears below the child's title and its full name is available on hover.
+
+The running timer uses the timestamp on the latest `task_started` journal event, accepting ISO 8601 with or without fractional seconds. It measures the current turn, not conversation age; terminal events clear it. Missing timestamps or a database-only running status show no duration. SwiftUI's native timer text updates without extra database reads or animation loops.
+
+Verification: `--check` covers parent context after filtering, valid/invalid navigation IDs, both timestamp formats, missing timestamps, and terminal-state timer removal. In the menu panel, click a title to open its task, use the chevron independently, and check parent text and elapsed time with Reduce Motion enabled.
 
 ## Login item
 
