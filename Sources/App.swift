@@ -240,6 +240,7 @@ private struct MinimalConversationRow: View {
     let item: Conversation
     @Binding var expandedIDs: Set<String>
     @State private var hovered = false
+    @State private var infoHovered = false
     @State private var showTitle = false
 
     private var expanded: Bool { expandedIDs.contains(item.id) }
@@ -328,6 +329,7 @@ private struct MinimalConversationRow: View {
             .foregroundStyle(item.status == .completed ? Color.codexGreen :
                              item.status == .running || item.status == .failed ? Color.codexOrange : Color.codexMuted)
             .fixedSize()
+            titleInfo
         }
         .padding(.horizontal, 7)
         .frame(height: rowHeight)
@@ -335,8 +337,21 @@ private struct MinimalConversationRow: View {
         .contentShape(Rectangle())
         .background(RoundedRectangle(cornerRadius: 5).fill(Color.white.opacity(hovered ? 0.04 : 0)))
         .onHover { hovered = $0 }
-        .task(id: hovered) {
-            guard hovered else {
+    }
+
+    private var titleInfo: some View {
+        Button { showTitle.toggle() } label: {
+            Image(systemName: "info.circle")
+                .font(.system(size: 10))
+                .foregroundStyle(Color.codexMuted)
+                .frame(width: 18, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Afficher le titre complet : \(item.title)")
+        .onHover { infoHovered = $0 }
+        .task(id: infoHovered) {
+            guard infoHovered else {
                 showTitle = false
                 return
             }
