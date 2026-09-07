@@ -45,7 +45,7 @@ struct Conversation: Identifiable, Sendable, Equatable {
     func filtered(showCompleted: Bool) -> [Conversation] {
         var result = self
         result.children = children.flatMap { $0.filtered(showCompleted: showCompleted) }
-        if !showCompleted && status == .completed { return result.children }
+        if !showCompleted && [.completed, .interrupted, .failed].contains(status) { return result.children }
         return [result]
     }
 }

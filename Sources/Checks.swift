@@ -88,6 +88,19 @@ func runChecks() {
                      "Hide completed parents while promoting their active children")
         precondition(parentOfActiveChild.filtered(showCompleted: true).first == parentOfActiveChild,
                      "Showing completed tasks must preserve the original hierarchy")
+        for status in [RunStatus.completed, .interrupted, .failed, .running, .unknown] {
+            let leaf = Conversation(id: "filter", title: "Filter", model: "test", effort: "test",
+                                    status: status, createdAt: 0, children: [])
+            let hidden = status == .completed || status == .interrupted || status == .failed
+            precondition(leaf.filtered(showCompleted: false).isEmpty == hidden,
+                         "Stopped tasks must be hidden; running and unknown tasks stay visible")
+            precondition(leaf.filtered(showCompleted: true) == [leaf],
+                         "The toggle must restore every non-archived status")
+            var parent = leaf
+            parent.children = parentOfActiveChild.children
+            precondition(parent.filtered(showCompleted: false).map(\.id) == (hidden ? ["child"] : ["filter"]),
+                         "Hidden parents must preserve active descendants for every stopped status")
+        }
         try fixture("state_5.sqlite", "UPDATE threads SET archived=1 WHERE id='child';")
         waitUntil("archived child disappears live") {
             monitor.conversations.first?.children.isEmpty == true
