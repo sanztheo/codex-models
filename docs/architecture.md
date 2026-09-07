@@ -73,3 +73,13 @@ The main app calls `SMAppService.mainApp.register()` on first launch, matching t
 - paginated journal completion overrides a stale running projection, updates the background count, and tracks subsequent starts, interruptions, and failures; missing journals preserve the database fallback.
 
 The displayed model is declared runtime metadata. It does not claim to prove server-side routing after a service-level reroute.
+
+## Remaining account quota
+
+The menu bar label is `icon | 27%`. `QuotaModel` polls immediately and every 30 seconds even with the panel closed, independently of the conversation reader. Each serial background read starts the installed Codex CLI's `app-server --stdio`, initializes JSON-RPC, and calls the documented `account/rateLimits/read` endpoint. No prompt or conversation is submitted. The existing CLI login and inherited `CODEX_HOME` are used; Codex Models does not read or log credentials. This adds an authenticated network request through Codex services, not a local token estimate.
+
+`rateLimitsByLimitId.codex` is authoritative when the map exists; the legacy `rateLimits` response is used only when the map is absent. Spark and other buckets never stand in for the main Codex quota. Remaining percentage is `100 - usedPercent`, clamped to 0–100 and rounded down. The smallest available remaining percentage across primary and secondary is shown. Primary is not assumed to mean five hours: the service may return a weekly primary window. The tooltip shows each returned window and its reset time in local time.
+
+A missing quota or failed refresh shows `—`, never an invented 100% or an apparently current cached value. The next poll retries automatically. Reads do not overlap; response size is bounded and each read has a 15-second timeout. The subprocess is terminated and reaped after success, error, or timeout. CLI discovery checks the user's `.local/bin`, the ChatGPT/Codex application bundles, standard Homebrew paths, and `PATH`. Users must have a signed-in Codex CLI; the app does not initiate login or redeem resets.
+
+Verification: `--check` uses synthetic quota responses and a temporary fake CLI to cover weekly primary windows, bucket selection, limiting windows, missing quotas, stdio initialization, timeout, periodic refresh while no window exists, unavailable state, and recovery. No quota check contacts a real account. Build/install validation should separately confirm the real account value and inspect the menu bar label and native help tooltip.

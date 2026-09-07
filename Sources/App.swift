@@ -403,6 +403,7 @@ private struct RunningSpinner: View {
 // Same window presentation as PerformanceViewer/PerformanceApp.swift.
 struct CodexModelsApp: App {
     @StateObject private var model = ConversationsModel()
+    @StateObject private var quota = QuotaModel()
 
     init() {
         if SMAppService.mainApp.status != .enabled {
@@ -416,11 +417,12 @@ struct CodexModelsApp: App {
         } label: {
             HStack(spacing: 3) {
                 Image(systemName: model.unreadCount > 0 ? "bell.badge" : "square.grid.2x2")
-                if model.unreadCount > 0 { Text("\(model.unreadCount)").monospacedDigit() }
+                Text("|")
+                Text(quota.menuText).monospacedDigit()
             }
             .font(.system(size: 11))
-            .accessibilityLabel("Codex Models, \(model.unreadCount) nouveaux sous-agents")
-            .help("Codex Models · \(model.activeCount) en cours · \(model.unreadCount) nouveaux sous-agents")
+            .accessibilityLabel("Codex Models, quota restant \(quota.menuText), \(model.unreadCount) nouveaux sous-agents")
+            .help(quota.tooltip)
         }
         .menuBarExtraStyle(.window)
     }

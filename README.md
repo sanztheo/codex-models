@@ -4,11 +4,12 @@
 
 > A minimal macOS menu bar app that shows live Codex conversations, sub-agents, models, reasoning effort, and run state.
 
-Codex Models is a small, native SwiftUI utility for developers who run several Codex agents in parallel. It reads Codex's local metadata in read-only mode and keeps the view current without sending prompts, transcripts, or credentials anywhere.
+Codex Models is a small, native SwiftUI utility for developers who run several Codex agents in parallel. It reads Codex's local metadata in read-only mode and keeps the view current without sending prompts or transcripts. Quota refreshes use the authenticated local Codex CLI to query Codex services.
 
 ## Features
 
 - Live parent/child conversation tree, refreshed every second.
+- Remaining Codex quota beside the menu bar icon, refreshed every 30 seconds; window details and reset times in the tooltip.
 - Exact model and reasoning-effort metadata recorded by Codex.
 - Orange spinner for running work and a green checkmark for completed work.
 - Archived conversations and archived sub-agents are always hidden.
@@ -16,7 +17,7 @@ Codex Models is a small, native SwiftUI utility for developers who run several C
 - Numbered badge for newly launched sub-agents; opening the panel acknowledges it.
 - Native `MenuBarExtra` window positioning, matching the reliable macOS menu bar pattern used by Performance Viewer.
 - Launch-at-login registration through `SMAppService`.
-- No network access, no external dependencies, and no data export.
+- Native frameworks only, with no conversation data export. Quota monitoring requires an installed, signed-in Codex CLI.
 
 ## Install
 
@@ -55,7 +56,7 @@ The app reads two local SQLite databases under `~/.codex`:
 - `state_5.sqlite` for conversation metadata and parent/child edges.
 - `thread_history_1.sqlite` for the latest recorded run state.
 
-Legacy conversations use `session_index.jsonl` for renamed titles and inspect only lifecycle events at the end of their rollout log when the newer history table has no state. Message content is not displayed or stored. The app never writes to Codex's databases and makes no network requests.
+Legacy conversations use `session_index.jsonl` for renamed titles and inspect only lifecycle events at the end of their rollout log when the newer history table has no state. Message content is not displayed or stored. The conversation reader never writes to Codex's databases. Quota monitoring calls `account/rateLimits/read` through the local Codex app server, which authenticates with Codex services using the existing CLI login. Credentials are not parsed or logged by Codex Models.
 
 The displayed model is the model Codex recorded for that conversation. It is useful runtime evidence, but it is not a cryptographic guarantee of server-side routing after a later reroute.
 

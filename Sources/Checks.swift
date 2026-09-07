@@ -4,6 +4,7 @@ import SQLite3
 @MainActor
 func runChecks() {
     do {
+        try runQuotaChecks()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -238,4 +239,59 @@ func runChecks() {
         fputs("Checks failed: \(error.localizedDescription)\n", stderr)
         exit(1)
     }
+}
+
+@MainActor
+private func runQuotaChecks() throws {
+    let fixture = Data(#"{"result":{"rateLimits":{"primary":{"usedPercent":0}},"rateLimitsByLimitId":{"codex":{"primary":{"usedPercent":73,"windowDurationMins":10080,"resetsAt":1789331361}},"spark":{"primary":{"usedPercent":0}}}}}"#.utf8)
+    let snapshot = try QuotaSnapshot.parse(fixture)
+    precondition(snapshot.remaining == 27, "Use remaining Codex quota, not used quota or Spark")
+    precondition(snapshot.windows[0].detail.contains("7 j"), "Primary quota may be weekly")
+    let secondary = try QuotaSnapshot.parse(Data(#"{"result":{"rateLimits":{"primary":{"usedPercent":20},"secondary":{"usedPercent":95}}}}"#.utf8))
+    precondition(secondary.remaining == 5, "Show the limiting quota window")
+    for invalid in [#"{"result":{"rateLimits":{}}}"#, #"{"result":{"rateLimits":{"primary":{"usedPercent":0}},"rateLimitsByLimitId":{"spark":{"primary":{"usedPercent":0}}}}}"#] {
+        do { _ = try QuotaSnapshot.parse(Data(invalid.utf8)); preconditionFailure("Missing Codex quota must not become 100%") }
+        catch {}
+    }
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let script = directory.appendingPathComponent("codex")
+    let response = String(data: fixture, encoding: .utf8)!.replacingOccurrences(of: "{\"result\":", with: "{\"id\":2,\"result\":")
+    let body = "#!/bin/sh\nIFS= read -r init\nprintf '%s\\n' '{\"id\":1,\"result\":{}}'\nIFS= read -r ready\nIFS= read -r request\nprintf '%s\\n' '\(response)'\nIFS= read -r end\n"
+    try body.write(to: script, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+    precondition(tryQuota(script) == 27, "Stdio handshake reads quota and cleans up the process")
+    try "#!/bin/sh\nwhile IFS= read -r line; do :; done\n".write(to: script, atomically: true, encoding: .utf8)
+    let started = Date()
+    do { _ = try CodexQuotaReader(executable: script, timeout: 0.15).load(); preconditionFailure("Unresponsive CLI must time out") } catch {}
+    precondition(Date().timeIntervalSince(started) < 2, "Timeout must bound the background read")
+
+    let lock = NSLock()
+    var fail = false
+    let model = QuotaModel(interval: 0.05) {
+        precondition(!Thread.isMainThread, "Quota reads must stay off the main thread")
+        lock.lock(); let shouldFail = fail; lock.unlock()
+        Thread.sleep(forTimeInterval: 0.08)
+        if shouldFail { throw NSError(domain: "Fixture", code: 1) }
+        return snapshot
+    }
+    defer { model.stopMonitoring() }
+    func wait(_ label: String, _ predicate: () -> Bool) {
+        let deadline = Date().addingTimeInterval(3)
+        while !predicate() && Date() < deadline { _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01)) }
+        precondition(predicate(), label)
+    }
+    wait("Quota loads without a window") { model.menuText == "27%" }
+    let first = model.lastSuccess
+    wait("Quota refreshes without a window") { model.lastSuccess != first }
+    lock.lock(); fail = true; lock.unlock()
+    wait("Failed refresh hides stale percentage") { model.menuText == "—" && model.errorMessage != nil }
+    lock.lock(); fail = false; lock.unlock()
+    wait("Quota recovers after failure") { model.menuText == "27%" && model.errorMessage == nil }
+    print("Quota checks passed")
+}
+
+private func tryQuota(_ executable: URL) -> Int? {
+    try? CodexQuotaReader(executable: executable, timeout: 2).load().remaining
 }
