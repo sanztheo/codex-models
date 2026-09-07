@@ -75,17 +75,19 @@ func runChecks() {
         roots = try reader.load()
         precondition(roots[0].children[0].status == .completed, "Open edge must not mean running")
         precondition(roots[0].activeCount == 1)
-        precondition(roots[0].filtered(showCompleted: false)?.children.isEmpty == true)
-        precondition(roots[0].filtered(showCompleted: true)?.children.count == 1,
+        precondition(roots[0].filtered(showCompleted: false).first?.children.isEmpty == true)
+        precondition(roots[0].filtered(showCompleted: true).first?.children.count == 1,
                      "Archived children must stay hidden even when completed tasks are shown")
         try fixture("thread_history_1.sqlite", "UPDATE thread_turns SET status='completed' WHERE thread_id='root';")
         let completed = try reader.load()[0]
-        precondition(completed.filtered(showCompleted: false) == nil)
+        precondition(completed.filtered(showCompleted: false).isEmpty)
         try fixture("thread_history_1.sqlite", "UPDATE thread_turns SET status='inProgress' WHERE thread_id='child';")
         let parentOfActiveChild = try reader.load()[0]
         precondition(parentOfActiveChild.status == .completed)
-        precondition(parentOfActiveChild.filtered(showCompleted: false)?.children.count == 1,
-                     "Keep a completed parent as context for its active child")
+        precondition(parentOfActiveChild.filtered(showCompleted: false).map(\.id) == ["child"],
+                     "Hide completed parents while promoting their active children")
+        precondition(parentOfActiveChild.filtered(showCompleted: true).first == parentOfActiveChild,
+                     "Showing completed tasks must preserve the original hierarchy")
         try fixture("state_5.sqlite", "UPDATE threads SET archived=1 WHERE id='child';")
         waitUntil("archived child disappears live") {
             monitor.conversations.first?.children.isEmpty == true
@@ -151,7 +153,7 @@ func runChecks() {
         let legacy = try reader.load().first { $0.id == "legacy" }!
         precondition(legacy.title == "Renamed conversation")
         precondition(legacy.status == .completed, "Read lifecycle beyond a chunk boundary")
-        precondition(legacy.filtered(showCompleted: false) == nil)
+        precondition(legacy.filtered(showCompleted: false).isEmpty)
         // A paginated projection can remain on an older inProgress turn after a resume.
         let currentLog = directory.appendingPathComponent("current.jsonl")
         try (lifecycle + noise).write(to: currentLog, atomically: true, encoding: .utf8)

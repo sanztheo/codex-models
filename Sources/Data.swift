@@ -42,11 +42,11 @@ struct Conversation: Identifiable, Sendable, Equatable {
         (status == .running ? 1 : 0) + children.reduce(0) { $0 + $1.activeCount }
     }
 
-    func filtered(showCompleted: Bool) -> Conversation? {
+    func filtered(showCompleted: Bool) -> [Conversation] {
         var result = self
-        result.children = children.compactMap { $0.filtered(showCompleted: showCompleted) }
-        if !showCompleted && status == .completed && result.children.isEmpty { return nil }
-        return result
+        result.children = children.flatMap { $0.filtered(showCompleted: showCompleted) }
+        if !showCompleted && status == .completed { return result.children }
+        return [result]
     }
 }
 

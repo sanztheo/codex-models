@@ -127,7 +127,7 @@ struct ConversationListView: View {
     }
 
     private var visible: [Conversation] {
-        model.conversations.compactMap { $0.filtered(showCompleted: showCompleted) }
+        model.conversations.flatMap { $0.filtered(showCompleted: showCompleted) }
     }
 
     private var listHeight: CGFloat {

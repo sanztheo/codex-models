@@ -21,7 +21,7 @@ Only named, non-archived interactive roots (`source=vscode` or `source=cli`) app
 
 The explicit conversation name wins over the initial title. A nameless sub-agent falls back to the final component of `agent_path`, then to its nickname, then to `Untitled conversation`.
 
-The completed toggle filters only non-archived `completed` leaves. A completed parent stays visible when it still contains a visible child, so active work never loses its context. Unknown, interrupted, and failed states remain visible.
+With the completed toggle off, every `completed` row is hidden at every depth. Its remaining children are promoted to the nearest visible ancestor (or the root list), so active work remains accessible without displaying completed parents. Turning the toggle on restores the original hierarchy. Unknown, interrupted, and failed states remain visible.
 
 ## Live monitoring
 
