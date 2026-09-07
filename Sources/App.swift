@@ -417,8 +417,7 @@ struct CodexModelsApp: App {
         } label: {
             HStack(spacing: 3) {
                 Image(systemName: model.unreadCount > 0 ? "bell.badge" : "square.grid.2x2")
-                Text("|")
-                Text(quota.menuText).monospacedDigit()
+                Text("| \(quota.menuText)").monospacedDigit()
             }
             .font(.system(size: 11))
             .accessibilityLabel("Codex Models, quota restant \(quota.menuText), \(model.unreadCount) nouveaux sous-agents")
