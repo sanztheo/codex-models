@@ -298,12 +298,17 @@ private struct MinimalConversationRow: View {
                 .buttonStyle(.plain)
                 .disabled(item.codexURL == nil)
                 .accessibilityLabel("Ouvrir \(item.title) dans Codex")
-                if let parent = item.parentTitle {
-                    Text("↳ \(parent)")
-                        .font(.system(size: 9))
-                        .foregroundStyle(Color.codexMuted)
-                        .lineLimit(1)
-                        .help("Tâche parente : \(parent)")
+                if item.folderName != nil || item.parentTitle != nil {
+                    HStack(spacing: 5) {
+                        if let folder = item.folderName {
+                            Label(folder, systemImage: "folder")
+                                .layoutPriority(1)
+                        }
+                        if let parent = item.parentTitle { Text("↳ \(parent)") }
+                    }
+                    .font(.system(size: 9))
+                    .foregroundStyle(Color.codexMuted)
+                    .lineLimit(1)
                 }
                 Text("\(item.model) · \(item.effort)")
                     .font(.system(size: 10))
@@ -361,7 +366,11 @@ private struct MinimalConversationRow: View {
             showTitle = true
         }
         .popover(isPresented: $showTitle, attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
-            Text(item.title)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(item.title)
+                if let parent = item.parentTitle { Text("Tâche parente : \(parent)") }
+                if let directory = item.workingDirectory { Text("Dossier : \(directory)") }
+            }
                 .font(.system(size: 11))
                 .foregroundStyle(Color(white: 0.12))
                 .lineLimit(nil)

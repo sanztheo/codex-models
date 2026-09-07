@@ -35,6 +35,11 @@ struct Conversation: Identifiable, Sendable, Equatable {
     var children: [Conversation]
     var parentTitle: String? = nil
     var turnStartedAt: Date? = nil
+    var workingDirectory: String? = nil
+
+    var folderName: String? {
+        workingDirectory.map { URL(fileURLWithPath: $0).lastPathComponent }
+    }
 
     var codexURL: URL? {
         guard UUID(uuidString: id) != nil else { return nil }
@@ -112,7 +117,7 @@ final class CodexReader: @unchecked Sendable {
         // One read transaction keeps thread names and parent links consistent.
         _ = try database.rows("BEGIN")
         var threads = try database.rows("""
-            SELECT id, name, title, model, reasoning_effort, agent_path, agent_nickname, archived, source,
+            SELECT id, name, title, model, reasoning_effort, agent_path, agent_nickname, archived, source, cwd,
                    COALESCE(created_at_ms / 1000.0, created_at) AS created_at, rollout_path
             FROM threads ORDER BY recency_at DESC, updated_at DESC, id
             """)
@@ -241,7 +246,7 @@ final class CodexReader: @unchecked Sendable {
                 status: statuses[id] ?? .unknown,
                 createdAt: Double(row["created_at"] ?? "") ?? 0,
                 children: (childIDs[id] ?? []).compactMap { make($0, ancestors: ancestors.union([id]), parentTitle: title) },
-                parentTitle: parentTitle, turnStartedAt: turnStarts[id]
+                parentTitle: parentTitle, turnStartedAt: turnStarts[id], workingDirectory: value("cwd")
             )
         }
         return threads.compactMap { row in

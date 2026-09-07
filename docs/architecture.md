@@ -8,7 +8,7 @@ Codex Models is a read-only macOS menu bar monitor for local Codex threads. Its 
 
 The reader opens two SQLite files under the configured Codex directory:
 
-- `state_5.sqlite`: `threads` supplies names, titles, models, reasoning effort, source, archive state, and timestamps. `thread_spawn_edges` supplies parent/child relationships.
+- `state_5.sqlite`: `threads` supplies names, titles, models, reasoning effort, source, archive state, working directory (`cwd`), and timestamps. `thread_spawn_edges` supplies parent/child relationships.
 - `thread_history_1.sqlite`: the latest `thread_turns` row supplies a fallback status: `inProgress`, `completed`, `interrupted`, or `failed`.
 
 Older threads use `session_index.jsonl` for the latest renamed title. For every visible thread, including paginated threads and sub-agents, the reader scans the end of the rollout log in 64 KiB blocks and accepts only lifecycle events: `task_started`, `task_complete`, `turn_aborted`, and `task_failed`. The latest recognized journal event takes precedence over the history projection: after a resume, that projection can remain stuck on an older `inProgress` turn even after later turns finish. Missing, unreadable, or unrecognized journals retain the database fallback; without either source the status is unknown. No inactivity timeout guesses that a long-running task has finished.
@@ -37,11 +37,17 @@ The panel is intentionally compact: 330 points wide, fixed 56-point rows, and a 
 
 A small information button at the right of each row owns the full-title popover. Hovering that button for 400 ms shows a compact light bubble with multiline wrapping; clicking it also toggles the bubble for keyboard access. Leaving the button cancels or dismisses the bubble, and removing the row dismisses it as well. Hovering the title or the rest of the row never opens this popover, so clicking a task remains unobstructed. The same row implementation handles parents and nested sub-agents. Model metadata retains its native help text.
 
+## Working directory
+
+Each row displays the final component of its own `threads.cwd` beside a folder icon. This is the recorded working directory, not an inferred repository name. Children keep their own path even when filtering promotes them. Missing paths produce no folder label. The full path appears only in the information-button popover alongside the title and parent; hovering the folder or title does not open it. No extra filesystem traversal is needed.
+
+`--check` covers paths with spaces, distinct child directories, preservation after filtering, and absent paths.
+
 ## Task navigation and running duration
 
 Clicking a title opens `codex://threads/<UUID>` through macOS, using the thread-link route emitted by the installed Codex app. Invalid identifiers disable navigation. The separate chevron only expands or collapses children. No conversation data is sent to a web service.
 
-Every child retains its direct parent's resolved title before filtering, including when a stopped parent is hidden and the child is promoted. The parent appears below the child's title and its full name is available on hover.
+Every child retains its direct parent's resolved title before filtering, including when a stopped parent is hidden and the child is promoted. The parent appears below the child's title; its full name is available in the information-button popover.
 
 The running timer uses the timestamp on the latest `task_started` journal event, accepting ISO 8601 with or without fractional seconds. It measures the current turn, not conversation age; terminal events clear it. Missing timestamps or a database-only running status show no duration. SwiftUI's native timer text updates without extra database reads or animation loops.
 

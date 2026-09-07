@@ -38,6 +38,9 @@ func runChecks() {
             ALTER TABLE threads ADD COLUMN created_at REAL NOT NULL DEFAULT 0;
             ALTER TABLE threads ADD COLUMN created_at_ms INTEGER;
             ALTER TABLE threads ADD COLUMN rollout_path TEXT;
+            ALTER TABLE threads ADD COLUMN cwd TEXT;
+            UPDATE threads SET cwd='/tmp/Example Project' WHERE id='root';
+            UPDATE threads SET cwd='/tmp/Other Project/worker' WHERE id='child';
             ALTER TABLE threads ADD COLUMN history_mode TEXT NOT NULL DEFAULT 'paginated';
             """)
         try fixture("thread_history_1.sqlite", """
@@ -68,6 +71,10 @@ func runChecks() {
         precondition(roots[0].children[0].effort == "max")
         precondition(roots[0].children[0].status == .running)
         precondition(roots[0].activeCount == 2)
+        precondition(roots[0].folderName == "Example Project", "Show the directory name, including spaces")
+        precondition(roots[0].children[0].folderName == "worker", "Children must use their own working directory")
+        precondition(roots[0].workingDirectory == "/tmp/Example Project", "Keep the full path for the info tooltip")
+
         try fixture("thread_history_1.sqlite", "UPDATE thread_turns SET status='completed' WHERE thread_id='child';")
         waitUntil("completed child while panel is closed") {
             monitor.conversations.first?.children.first?.status == .completed
@@ -84,6 +91,9 @@ func runChecks() {
         try fixture("thread_history_1.sqlite", "UPDATE thread_turns SET status='inProgress' WHERE thread_id='child';")
         let parentOfActiveChild = try reader.load()[0]
         precondition(parentOfActiveChild.status == .completed)
+        precondition(parentOfActiveChild.filtered(showCompleted: false).first?.workingDirectory == "/tmp/Other Project/worker",
+                     "Promoted children must preserve their own directory")
+
         precondition(parentOfActiveChild.filtered(showCompleted: false).first?.parentTitle == "Conversation renommée",
                      "Promoted children must retain their original parent title")
         let link = parentOfActiveChild
@@ -174,6 +184,7 @@ func runChecks() {
             """)
         let legacy = try reader.load().first { $0.id == "legacy" }!
         precondition(legacy.title == "Renamed conversation")
+        precondition(legacy.folderName == nil, "Missing directories must not invent a project")
         precondition(legacy.status == .completed, "Read lifecycle beyond a chunk boundary")
         precondition(legacy.filtered(showCompleted: false).isEmpty)
         // A paginated projection can remain on an older inProgress turn after a resume.
