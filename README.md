@@ -8,7 +8,7 @@ Codex Models is a small, native SwiftUI utility for developers who run several C
 
 ## Features
 
-- Live parent/child conversation tree, refreshed every second.
+- Live parent/child conversation tree, refreshed every second; unchanged journals reuse cached lifecycle metadata.
 - Remaining Codex quota beside the menu bar icon, refreshed every 30 seconds; window details and reset times in the tooltip.
 - Exact model and reasoning-effort metadata recorded by Codex.
 - Orange spinner for running work and a green checkmark for completed work.
@@ -41,7 +41,17 @@ bash build.sh
 "../Codex Models.app/Contents/MacOS/CodexModels" --check
 ```
 
-`--check` covers the conversation tree, legacy metadata, archived filtering, live state changes, read errors and recovery, new-agent badge behavior, and the read-only SQLite contract.
+The build enables Swift speed optimizations (`-O`), retaining the `precondition` checks.
+
+If Command Line Tools selects the macOS 27 SDK but reports a missing `SwiftUIMacros.StateMacro` plugin, select an installed macOS 26 SDK for this build (adjust the path to the SDK you have):
+
+```sh
+SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk bash build.sh
+```
+
+This does not change the system developer-directory selection or the macOS 13 deployment target.
+
+`--check` covers long-line journal performance and cache invalidation, the conversation tree, legacy metadata, archived filtering, live state changes, read errors and recovery, new-agent badge behavior, and the read-only SQLite contract.
 
 For a regular window preview instead of the menu bar extra:
 
@@ -65,10 +75,13 @@ The displayed model is the model Codex recorded for that conversation. It is use
 ```text
 Sources/App.swift       SwiftUI views, live monitor, menu bar scene
 Sources/Data.swift      Read-only SQLite reader and conversation tree
+Sources/RolloutReader.swift  Cached lifecycle reader for rollout journals
 Sources/Checks.swift    Lightweight executable verification checks
 Scripts/                Icon generation and /Applications installer
 docs/architecture.md    Data invariants and verification notes
 ```
+
+See [architecture and energy behavior](docs/architecture.md#energy-and-journal-reading) for cache rules and measurement guidance.
 
 ## License
 

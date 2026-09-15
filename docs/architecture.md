@@ -29,17 +29,33 @@ With the completed toggle off, every `completed`, `interrupted`, or `failed` row
 
 The first successful snapshot establishes the known sub-agent IDs without creating a notification. Later descendants whose creation timestamp is after monitor startup become unread new-agent IDs. Acknowledgement clears the badge; archived IDs are removed from it. The badge is intentionally session-scoped and does not persist across launches.
 
+## Energy and journal reading
+
+`RolloutReader` owns journal scanning and its cache on the existing serial reader queue. Each poll checks file attributes; unchanged regular files reuse only their lifecycle status and turn-start timestamp. Size, modification date, file identity and permissions participate in invalidation. Missing or unreadable files discard the cached result and preserve the database fallback. Symlinks bypass the cache because their attributes do not describe target changes. Entries disappear when their paths leave the visible tree. A file changed during a scan is not cached.
+
+Backward reads still use 64 KiB blocks and preserve lifecycle precedence and timestamp parsing. Each block is scanned once; fragments of a long JSONL line are assembled once at its beginning. The previous loop repeatedly copied and split the growing line, giving quadratic work on large transcript/tool-output lines. No transcript content survives a scan. Changed files are scanned backward to the latest lifecycle event; this is not an incremental tailer.
+
+The one-second conversation cadence and 30-second quota cadence remain, including while the panel is closed. Both timers allow 10% tolerance so macOS can coalesce wakeups, following [Apple's timer energy guidance](https://developer.apple.com/library/archive/documentation/Performance/Conceptual/power_efficiency_guidelines_osx/Timers.html). The build enables Swift `-O` speed optimization; it does not use `-Ounchecked`, so fixture preconditions remain active. Event-driven database/journal monitoring is deferred: this correction removes the measured hot loop without changing the freshness or recovery contract.
+
+`--check` includes a 2 MiB line, repeated unchanged polls, partial-record append/completion, in-place truncation, same-size/date file replacement, deletion and recovery. Existing fixtures continue checking live status and badges without a window. `Checks.swift` remains one cohesive executable harness despite exceeding the 300-line review signal; the journal implementation has its own responsibility in `RolloutReader.swift`.
+
+For performance verification, sample the running process and compare CPU time over equal intervals with the panel closed. Activity Monitor's Energy Impact is a relative current score; its 12-hour average retains earlier activity and cannot immediately demonstrate an improvement. Do not equate CPU percentage with that score. Quota subprocess costs and open-panel animation are separate from the local journal reader.
+
+Local verification on 2026-09-15 (Apple Silicon, macOS 27; Swift 6.4 with the installed macOS 26.5 SDK): the old process used 20.70 CPU seconds over 20.03 seconds (103.35%). The installed corrected process used 1.07 CPU seconds over 20.01 seconds (5.35%), then 1.91 over 35.01 seconds after settling (5.46%), with the menu panel unopened after relaunch. These are process CPU measurements during ongoing Codex activity, not battery or Energy Impact scores. The real reader returned six roots/three active tasks in 240 ms cold and 22 ms warm. Full executable checks passed, as did installed-binary hash matching and signature verification. Automated visual inspection was unavailable because the macOS UI tool timed out; this correction does not change the panel layout.
+
 ## UI and positioning
 
 The interface uses SwiftUI `MenuBarExtra` with `.menuBarExtraStyle(.window)`, the same native presentation pattern used by [Performance Viewer](https://github.com/sanztheo/PerformanceViewer/blob/da96cbe133bcfceaa6bf7a769128f91860d28dc1/Performance/PerformanceApp.swift). macOS owns anchoring, placement, and window sizing; Codex Models does not calculate popover coordinates or manage an `NSStatusItem`/`NSPopover` pair.
 
-The panel is intentionally compact: 330 points wide, fixed 56-point rows, and a scrollable list beyond 300 points. Running rows show a small orange spinner on the left. Completed rows show a green checkmark on the right. The main menu bar icon remains fixed; only the row spinner animates, and it pauses when Reduce Motion is enabled.
+The graphite panel follows the approved OpenAI-inspired mockup at a compact native scale: 330 points wide, 52-point parent rows, 36-point nested rows, and a scrollable list beyond 280 points. The header groups identity, active count, and remaining quota above the two filter segments. The Terminées segment includes stopped conversations alongside active ones, preserving the existing filter contract. There is no redundant settings menu; refresh stays in the footer and login-item settings remain in macOS System Settings.
+
+Trees start expanded; a session-local set records only explicitly collapsed IDs, so newly arriving descendants are visible immediately. Root groups have hairline separators; nested rows use a thin tree guide and omit redundant directory/parent labels. Hover fills a row subtly. Running parents show an orange ring beside their timer; running children use a static orange dot. Other states retain explicit labels. The main menu bar icon remains fixed; only the parent ring animates, and it pauses when Reduce Motion is enabled. The panel and menu bar share one QuotaModel; opening the panel does not start a second poller. The quota progress bar displays the same remaining percentage as the menu label and disappears when unavailable.
 
 A small information button at the right of each row owns the full-title popover. Hovering that button for 400 ms shows a compact light bubble with multiline wrapping; clicking it also toggles the bubble for keyboard access. Leaving the button cancels or dismisses the bubble, and removing the row dismisses it as well. Hovering the title or the rest of the row never opens this popover, so clicking a task remains unobstructed. The same row implementation handles parents and nested sub-agents. Model metadata retains its native help text.
 
 ## Working directory
 
-Each row displays the final component of its own `threads.cwd` beside a folder icon. This is the recorded working directory, not an inferred repository name. Children keep their own path even when filtering promotes them. Missing paths produce no folder label. The full path appears only in the information-button popover alongside the title and parent; hovering the folder or title does not open it. No extra filesystem traversal is needed.
+Each top-level visible row displays the final component of its own `threads.cwd`. Nested rows keep directory details in their information popover to reduce repetition. This is the recorded working directory, not an inferred repository name. Children keep their own path even when filtering promotes them. Missing paths produce no folder label. The full path appears only in the information-button popover alongside the title and parent; hovering the folder or title does not open it. No extra filesystem traversal is needed.
 
 `--check` covers paths with spaces, distinct child directories, preservation after filtering, and absent paths.
 
@@ -47,11 +63,11 @@ Each row displays the final component of its own `threads.cwd` beside a folder i
 
 Clicking a title opens `codex://threads/<UUID>` through macOS, using the thread-link route emitted by the installed Codex app. Invalid identifiers disable navigation. The separate chevron only expands or collapses children. No conversation data is sent to a web service.
 
-Every child retains its direct parent's resolved title before filtering, including when a stopped parent is hidden and the child is promoted. The parent appears below the child's title; its full name is available in the information-button popover.
+Every child retains its direct parent's resolved title before filtering, including when a stopped parent is hidden and the child is promoted. A promoted child shows the parent below its title; nested children omit the repeated parent label. The full parent name remains available in the information-button popover in either case.
 
 The running timer uses the timestamp on the latest `task_started` journal event, accepting ISO 8601 with or without fractional seconds. It measures the current turn, not conversation age; terminal events clear it. Missing timestamps or a database-only running status show no duration. SwiftUI's native timer text updates without extra database reads or animation loops.
 
-Verification: `--check` covers parent context after filtering, valid/invalid navigation IDs, both timestamp formats, missing timestamps, and terminal-state timer removal. In the menu panel, click a title to open its task, use the chevron independently, and check parent text and elapsed time with Reduce Motion enabled.
+Verification: `--check` covers parent context after filtering, valid/invalid navigation IDs, both timestamp formats, missing timestamps, and terminal-state timer removal. In both `--preview` and the installed menu panel, check the 330-point width, initial expanded hierarchy, chevron collapse/reopen, both filter segments, row hover and information popover, and the quota tooltip. Click a title to open its task, use the chevron independently, and check promoted parent text and elapsed time with Reduce Motion enabled. Refresh must update both existing readers; keyboard navigation must reach the filters, task links, information buttons, and footer actions.
 
 ## Login item
 

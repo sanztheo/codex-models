@@ -12,6 +12,7 @@ cp -- "$script_dir/Resources/AppIcon.icns" "$app_bundle/Contents/Resources/AppIc
 
 xcrun swiftc \
     -swift-version 5 \
+    -O \
     -target "$(uname -m)-apple-macos13.0" \
     -parse-as-library \
     -framework AppKit \

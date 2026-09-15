@@ -109,6 +109,7 @@ final class ReadDatabase {
 
 final class CodexReader: @unchecked Sendable {
     private let directory: URL
+    private let rollouts = RolloutReader()
 
     init(directory: URL) { self.directory = directory }
 
@@ -149,10 +150,14 @@ final class CodexReader: @unchecked Sendable {
         }
         let visible = Self.tree(threads: threads, edges: edges, statuses: statuses)
         let visibleIDs = Set(visible.flatMap { [$0] + $0.descendants }.map(\.id))
+        rollouts.retain(paths: Set(threads.compactMap { row in
+            guard let id = row["id"], visibleIDs.contains(id) else { return nil }
+            return row["rollout_path"]
+        }))
         // The history projection can lag behind resumed turns, including paginated threads.
         for row in threads {
             if let id = row["id"], visibleIDs.contains(id), let path = row["rollout_path"] {
-                let event = rolloutStatus(at: URL(fileURLWithPath: path))
+                let event = rollouts.status(at: URL(fileURLWithPath: path))
                 if event.status != .unknown { statuses[id] = event.status }
                 turnStarts[id] = event.startedAt
             }
@@ -170,45 +175,6 @@ final class CodexReader: @unchecked Sendable {
             }
         }
         return titles
-    }
-
-    private func rolloutStatus(at url: URL) -> (status: RunStatus, startedAt: Date?) {
-        guard let file = try? FileHandle(forReadingFrom: url) else { return (.unknown, nil) }
-        defer { try? file.close() }
-        do {
-            var offset = try file.seekToEnd()
-            var partial = Data()
-            // Read backwards to the latest lifecycle event, rather than reloading a large transcript.
-            while offset > 0 {
-                let start = offset > 65_536 ? offset - 65_536 : 0
-                try file.seek(toOffset: start)
-                var block = try file.read(upToCount: Int(offset - start)) ?? Data()
-                block.append(partial)
-                let lines = block.split(separator: 10, omittingEmptySubsequences: false)
-                for line in lines.dropFirst(start > 0 ? 1 : 0).reversed() {
-                    guard line.range(of: Data("\"event_msg\"".utf8)) != nil,
-                          let record = (try? JSONSerialization.jsonObject(with: Data(line))) as? [String: Any],
-                          record["type"] as? String == "event_msg",
-                          let payload = record["payload"] as? [String: Any] else { continue }
-                    switch payload["type"] as? String {
-                    case "task_complete": return (.completed, nil)
-                    case "task_started":
-                        let formatter = ISO8601DateFormatter()
-                        let timestamp = record["timestamp"] as? String ?? ""
-                        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                        let fractional = formatter.date(from: timestamp)
-                        formatter.formatOptions = [.withInternetDateTime]
-                        return (.running, fractional ?? formatter.date(from: timestamp))
-                    case "turn_aborted": return (.interrupted, nil)
-                    case "task_failed": return (.failed, nil)
-                    default: continue
-                    }
-                }
-                partial = start > 0 ? Data(lines.first ?? Data.SubSequence()) : Data()
-                offset = start
-            }
-        } catch { return (.unknown, nil) }
-        return (.unknown, nil)
     }
 
     static func tree(threads: [[String: String]], edges: [[String: String]],

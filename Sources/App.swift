@@ -3,7 +3,8 @@ import ServiceManagement
 import SwiftUI
 
 private let panelWidth: CGFloat = 330
-private let rowHeight: CGFloat = 56
+private let rowHeight: CGFloat = 52
+private let childRowHeight: CGFloat = 36
 
 private func defaultCodexDirectory() -> URL {
     if let configured = ProcessInfo.processInfo.environment["CODEX_HOME"], !configured.isEmpty {
@@ -14,11 +15,11 @@ private func defaultCodexDirectory() -> URL {
 }
 
 private extension Color {
-    static let codexBackground = Color(red: 20 / 255, green: 20 / 255, blue: 20 / 255)
+    static let codexBackground = Color(red: 25 / 255, green: 27 / 255, blue: 29 / 255)
     static let codexGreen = Color(red: 40 / 255, green: 224 / 255, blue: 123 / 255)
-    static let codexOrange = Color(red: 255 / 255, green: 106 / 255, blue: 54 / 255)
+    static let codexOrange = Color(red: 255 / 255, green: 163 / 255, blue: 65 / 255)
     static let codexText = Color(red: 248 / 255, green: 248 / 255, blue: 245 / 255)
-    static let codexMuted = Color(red: 150 / 255, green: 150 / 255, blue: 150 / 255)
+    static let codexMuted = Color(red: 166 / 255, green: 170 / 255, blue: 176 / 255)
 }
 
 @MainActor
@@ -57,6 +58,7 @@ final class ConversationsModel: ObservableObject {
                 self?.refresh()
             }
         }
+        refreshTimer?.tolerance = 0.1
     }
 
     func stopMonitoring() {
@@ -113,16 +115,34 @@ final class ConversationsModel: ObservableObject {
     }
 }
 
+private struct CodexMark: View {
+    var body: some View {
+        ZStack {
+            ForEach(0..<6) { index in
+                RoundedRectangle(cornerRadius: 3)
+                    .stroke(Color.codexText, lineWidth: 1.2)
+                    .frame(width: 10, height: 15)
+                    .offset(y: -4)
+                    .rotationEffect(.degrees(Double(index) * 60))
+            }
+        }
+        .frame(width: 25, height: 25)
+        .accessibilityHidden(true)
+    }
+}
+
 struct ConversationListView: View {
     @ObservedObject var model: ConversationsModel
+    @ObservedObject var quota: QuotaModel
     let onQuit: () -> Void
     @AppStorage("showCompleted") private var showCompleted = false
-    @State private var expandedIDs: Set<String> = []
+    @State private var collapsedIDs: Set<String> = []
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    init(model: ConversationsModel,
+    init(model: ConversationsModel, quota: QuotaModel,
          onQuit: @escaping () -> Void = { NSApplication.shared.terminate(nil) }) {
         self.model = model
+        self.quota = quota
         self.onQuit = onQuit
     }
 
@@ -131,49 +151,63 @@ struct ConversationListView: View {
     }
 
     private var listHeight: CGFloat {
-        func rowCount(_ item: Conversation) -> Int {
-            1 + (expandedIDs.contains(item.id) ? item.children.reduce(0) { $0 + rowCount($1) } : 0)
+        func height(_ item: Conversation, nested: Bool) -> CGFloat {
+            (nested ? childRowHeight : rowHeight) + (collapsedIDs.contains(item.id) ? 0 :
+                item.children.reduce(CGFloat.zero) { $0 + height($1, nested: true) })
         }
-        let count = visible.reduce(0) { $0 + rowCount($1) }
-        return min(300, max(70, CGFloat(count) * rowHeight + 10))
+        return min(280, max(70, visible.reduce(CGFloat(4)) { $0 + height($1, nested: false) + 5 }))
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 7) {
-                Text("Codex")
-                    .font(.system(size: 12, weight: .semibold))
-                if model.isHealthy {
-                    if model.activeCount > 0 {
-                        Circle().fill(Color.codexOrange).frame(width: 4, height: 4)
+            VStack(spacing: 8) {
+                HStack(spacing: 7) {
+                    CodexMark().scaleEffect(0.72).frame(width: 18, height: 18)
+                    Text("Codex Models").font(.system(size: 12, weight: .semibold))
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 5) {
+                        (Text("Quota restant ").foregroundColor(.codexMuted) + Text(quota.menuText).bold())
+                        if let remaining = quota.snapshot?.remaining {
+                            ProgressView(value: Double(remaining), total: 100)
+                                .tint(Color(white: 0.76))
+                                .scaleEffect(x: 1, y: 0.65)
+                                .accessibilityLabel("Quota restant")
+                                .accessibilityValue("\(remaining) pour cent")
+                        }
                     }
-                    Text("\(model.activeCount) en cours")
-                        .font(.system(size: 10))
-                        .foregroundStyle(Color.codexMuted)
+                    .frame(width: 108)
+                    .help(quota.tooltip)
                 }
-                Spacer(minLength: 5)
-                if model.unreadCount > 0 {
-                    Button { model.acknowledgeNewAgents() } label: {
-                        Label("\(model.unreadCount)", systemImage: "bell.fill")
+                .font(.system(size: 11))
+                HStack(spacing: 8) {
+                    HStack(spacing: 7) {
+                        Circle().fill(model.isHealthy ? Color.codexOrange : Color.codexMuted)
+                            .frame(width: 7, height: 7)
+                        Text(model.isHealthy ? "\(model.activeCount) en cours" : "Lecture en cours…")
                     }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Color.codexOrange)
-                    .help("Nouveaux sous-agents · cliquer pour effacer le badge")
-                    .accessibilityLabel("Marquer \(model.unreadCount) nouveaux sous-agents comme vus")
+                    Spacer()
+                    if model.unreadCount > 0 {
+                        Button { model.acknowledgeNewAgents() } label: {
+                            Label("\(model.unreadCount)", systemImage: "bell.fill")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Color.codexOrange)
+                        .accessibilityLabel("Marquer \(model.unreadCount) nouveaux sous-agents comme vus")
+                    }
+                HStack(spacing: 2) {
+                    filterButton("En cours", selected: !showCompleted) { showCompleted = false }
+                    filterButton("Terminées", selected: showCompleted) { showCompleted = true }
                 }
-                Toggle("Terminées", isOn: $showCompleted)
-                    .toggleStyle(.checkbox)
-                    .controlSize(.mini)
-                    .font(.system(size: 10))
-                    .foregroundStyle(Color.codexMuted)
-                    .help("Afficher les conversations et sous-agents terminés non archivés")
-                    .accessibilityLabel("Afficher les terminées")
+                .padding(2)
+                .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.10), lineWidth: 1))
+                    .frame(width: 185)
+                }
+                .font(.system(size: 10))
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .padding(.top, 10)
+            .padding(.bottom, 6)
 
-            Divider().overlay(Color.white.opacity(0.04))
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     if visible.isEmpty {
@@ -186,47 +220,56 @@ struct ConversationListView: View {
                             .padding(.vertical, 28)
                     } else {
                         ForEach(visible) { item in
-                            MinimalConversationRow(item: item, expandedIDs: $expandedIDs)
+                            MinimalConversationRow(item: item, collapsedIDs: $collapsedIDs)
+                                .padding(.vertical, 2)
+                            if item.id != visible.last?.id {
+                                Divider().overlay(Color.white.opacity(0.04))
+                            }
                         }
                     }
                 }
-                .padding(.horizontal, 5)
-                .padding(.vertical, 5)
-                .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: visible)
-                .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: expandedIDs)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 2)
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.16), value: visible)
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.16), value: collapsedIDs)
             }
             .scrollIndicators(.hidden)
             .frame(height: listHeight)
 
             Divider().overlay(Color.white.opacity(0.04))
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
+                Circle().fill(Color.codexMuted).frame(width: 5, height: 5)
                 if let error = model.errorMessage {
-                    Text("Lecture indisponible")
-                        .foregroundStyle(Color.codexOrange)
-                        .help(error)
+                    Text("Lecture indisponible").foregroundStyle(Color.codexOrange).help(error)
                 } else if let date = model.lastSuccess {
-                    Text(date.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits).second(.twoDigits)))
+                    Text("Actualisé à \(date.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits)))")
                         .monospacedDigit()
                         .help("Dernière lecture réussie · actualisation chaque seconde")
                 } else {
                     Text("Connexion…")
                 }
                 Spacer()
-                Button { model.refresh() } label: { Image(systemName: "arrow.clockwise") }
-                    .help("Actualiser")
-                    .accessibilityLabel("Actualiser")
-                Button(action: onQuit) { Image(systemName: "power") }
-                    .help("Quitter")
-                    .accessibilityLabel("Quitter Codex Models")
+                Button { model.refresh(); quota.refresh() } label: {
+                    Image(systemName: "arrow.clockwise").frame(width: 22, height: 22)
+                        .overlay(Circle().stroke(Color.white.opacity(0.12), lineWidth: 1))
+                }
+                .help("Actualiser").accessibilityLabel("Actualiser")
+                Button(action: onQuit) {
+                    Image(systemName: "power").frame(width: 22, height: 22)
+                        .overlay(Circle().stroke(Color.white.opacity(0.12), lineWidth: 1))
+                }
+                .help("Quitter").accessibilityLabel("Quitter Codex Models")
             }
             .buttonStyle(.plain)
             .font(.system(size: 10))
             .foregroundStyle(Color.codexMuted)
             .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.vertical, 6)
         }
         .frame(width: panelWidth)
         .background(Color.codexBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.16), lineWidth: 0.75))
         .foregroundStyle(Color.codexText)
         .environment(\.colorScheme, .dark)
         .onAppear { model.acknowledgeNewAgents() }
@@ -234,16 +277,38 @@ struct ConversationListView: View {
             model.acknowledgeNewAgents()
         }
     }
+
+    private func filterButton(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Text(title)
+                if !showCompleted && title == "En cours" && model.isHealthy {
+                    Text("\(model.activeCount)")
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(Capsule().fill(Color.white.opacity(0.08)))
+                }
+            }
+            .font(.system(size: 11, weight: selected ? .medium : .regular))
+            .frame(maxWidth: .infinity).frame(height: 22)
+            .background(RoundedRectangle(cornerRadius: 5).fill(Color.white.opacity(selected ? 0.10 : 0)))
+            .foregroundStyle(selected ? Color.codexText : Color.codexMuted)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .help(title == "Terminées" ? "Inclure les conversations terminées non archivées" : "Masquer les conversations terminées")
+    }
 }
 
 private struct MinimalConversationRow: View {
     let item: Conversation
-    @Binding var expandedIDs: Set<String>
+    @Binding var collapsedIDs: Set<String>
+    var nested = false
     @State private var hovered = false
     @State private var infoHovered = false
     @State private var showTitle = false
 
-    private var expanded: Bool { expandedIDs.contains(item.id) }
+    private var expanded: Bool { !collapsedIDs.contains(item.id) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -251,11 +316,11 @@ private struct MinimalConversationRow: View {
             if expanded {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(item.children) { child in
-                        MinimalConversationRow(item: child, expandedIDs: $expandedIDs)
+                        MinimalConversationRow(item: child, collapsedIDs: $collapsedIDs, nested: true)
                     }
                 }
                 .overlay(alignment: .leading) {
-                    Rectangle().fill(Color.white.opacity(0.10)).frame(width: 1).padding(.vertical, 4)
+                    Rectangle().fill(Color.white.opacity(0.23)).frame(width: 0.75).padding(.vertical, 4)
                 }
                 .padding(.leading, 14)
                 .transition(.opacity)
@@ -266,8 +331,8 @@ private struct MinimalConversationRow: View {
     private var label: some View {
         HStack(alignment: .center, spacing: 7) {
             Button {
-                if expanded { expandedIDs.remove(item.id) }
-                else { expandedIDs.insert(item.id) }
+                if expanded { collapsedIDs.insert(item.id) }
+                else { collapsedIDs.remove(item.id) }
             } label: {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 8, weight: .medium))
@@ -279,18 +344,13 @@ private struct MinimalConversationRow: View {
             .opacity(item.children.isEmpty ? 0 : 0.5)
             .disabled(item.children.isEmpty)
             .accessibilityLabel("\(expanded ? "Replier" : "Déplier") les sous-agents de \(item.title)")
-            if item.status == .running {
-                RunningSpinner()
-            } else {
-                Color.clear.frame(width: 9, height: 9)
-            }
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 2) {
                 Button {
                     showTitle = false
                     if let url = item.codexURL { NSWorkspace.shared.open(url) }
                 } label: {
                     Text(item.title)
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(size: 11, weight: .semibold))
                         .lineLimit(1)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
@@ -298,11 +358,10 @@ private struct MinimalConversationRow: View {
                 .buttonStyle(.plain)
                 .disabled(item.codexURL == nil)
                 .accessibilityLabel("Ouvrir \(item.title) dans Codex")
-                if item.folderName != nil || item.parentTitle != nil {
+                if !nested && (item.folderName != nil || item.parentTitle != nil) {
                     HStack(spacing: 5) {
                         if let folder = item.folderName {
-                            Label(folder, systemImage: "folder")
-                                .layoutPriority(1)
+                            Text(folder).layoutPriority(1)
                         }
                         if let parent = item.parentTitle { Text("↳ \(parent)") }
                     }
@@ -317,38 +376,43 @@ private struct MinimalConversationRow: View {
                     .help("\(item.model), effort \(item.effort)")
             }
             Spacer(minLength: 4)
-            HStack(spacing: 3) {
-                if item.status == .completed { Image(systemName: "checkmark") }
-                if item.status == .failed { Image(systemName: "exclamationmark.triangle") }
-                VStack(alignment: .trailing, spacing: 3) {
-                    Text(item.status.label)
-                    if item.status == .running, let start = item.turnStartedAt {
+            HStack(spacing: 7) {
+                if item.status == .running {
+                    if nested { Circle().fill(Color.codexOrange).frame(width: 6, height: 6) }
+                    else { RunningSpinner() }
+                    if let start = item.turnStartedAt {
                         Text(start, style: .timer)
                             .monospacedDigit()
-                            .foregroundStyle(Color.codexMuted)
+                            .foregroundStyle(Color.codexText)
                             .help("Durée depuis le début du tour en cours")
                     }
+                } else {
+                    if item.status == .completed { Image(systemName: "checkmark") }
+                    if item.status == .failed { Image(systemName: "exclamationmark.triangle") }
+                    Text(item.status.label)
                 }
             }
-            .font(.system(size: 9))
+            .font(.system(size: 10))
             .foregroundStyle(item.status == .completed ? Color.codexGreen :
-                             item.status == .running || item.status == .failed ? Color.codexOrange : Color.codexMuted)
+                             item.status == .failed ? Color.codexOrange : Color.codexMuted)
             .fixedSize()
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(item.status.label)
             titleInfo
         }
         .padding(.horizontal, 7)
-        .frame(height: rowHeight)
+        .frame(height: nested ? childRowHeight : rowHeight)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
-        .background(RoundedRectangle(cornerRadius: 5).fill(Color.white.opacity(hovered ? 0.04 : 0)))
+        .background(RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(hovered ? 0.055 : 0)))
         .onHover { hovered = $0 }
     }
 
     private var titleInfo: some View {
         Button { showTitle.toggle() } label: {
             Image(systemName: "info.circle")
-                .font(.system(size: 10))
-                .foregroundStyle(Color.codexMuted)
+                .font(.system(size: 12))
+                .foregroundStyle(Color.codexMuted.opacity(hovered || showTitle ? 1 : 0.4))
                 .frame(width: 18, height: 28)
                 .contentShape(Rectangle())
         }
@@ -395,7 +459,7 @@ private struct RunningSpinner: View {
                 .rotationEffect(.degrees(reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate
                     .truncatingRemainder(dividingBy: 1) * 360))
         }
-        .frame(width: 9, height: 9)
+        .frame(width: 12, height: 12)
         .accessibilityHidden(true)
     }
 }
@@ -413,7 +477,7 @@ struct CodexModelsApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            ConversationListView(model: model)
+            ConversationListView(model: model, quota: quota)
         } label: {
             HStack(spacing: 3) {
                 Image(systemName: model.unreadCount > 0 ? "bell.badge" : "square.grid.2x2")
@@ -429,10 +493,11 @@ struct CodexModelsApp: App {
 
 struct CodexModelsPreviewApp: App {
     @StateObject private var model = ConversationsModel()
+    @StateObject private var quota = QuotaModel()
 
     var body: some Scene {
         WindowGroup("Codex Models") {
-            ConversationListView(model: model)
+            ConversationListView(model: model, quota: quota)
         }
         .windowResizability(.contentSize)
         .defaultPosition(.center)

@@ -122,6 +122,7 @@ final class QuotaModel: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.refresh() }
         }
+        timer?.tolerance = interval * 0.1
     }
 
     var menuText: String { snapshot?.remaining.map { "\($0)%" } ?? "—" }

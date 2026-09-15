@@ -188,6 +188,60 @@ func runChecks() {
         precondition(legacy.folderName == nil, "Missing directories must not invent a project")
         precondition(legacy.status == .completed, "Read lifecycle beyond a chunk boundary")
         precondition(legacy.filtered(showCompleted: false).isEmpty)
+        // A long transcript line used to be copied and split again for every 64 KiB block.
+        let largeNoise = "{\"type\":\"response_item\",\"payload\":\"" + String(repeating: "x", count: 2_097_152) + "\"}\n"
+        try (lifecycle + largeNoise).write(to: legacyLog, atomically: true, encoding: .utf8)
+        let scanStarted = Date()
+        let largeLegacy = try reader.load().first { $0.id == "legacy" }
+        let scanDuration = Date().timeIntervalSince(scanStarted)
+        print("Long-line journal scan: \(scanDuration) seconds")
+        precondition(largeLegacy?.status == .completed, "Long lines must not hide lifecycle events")
+        precondition(scanDuration < 3, "A 2 MiB journal line must not monopolize the reader for seconds")
+        let cachedStarted = Date()
+        for _ in 0..<30 {
+            let unchanged = try reader.load().first { $0.id == "legacy" }
+            precondition(unchanged?.status == .completed, "Unchanged journals retain their lifecycle")
+        }
+        precondition(Date().timeIntervalSince(cachedStarted) < 3,
+                     "Repeated polls must reuse unchanged journals instead of rescanning transcript bytes")
+        let journalReader = RolloutReader()
+        precondition(journalReader.status(at: legacyLog).status == .completed)
+        let append = try FileHandle(forWritingTo: legacyLog)
+        try append.seekToEnd()
+        try append.write(contentsOf: Data("{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_sta".utf8))
+        precondition(journalReader.status(at: legacyLog).status == .completed,
+                     "An incomplete final record must retain the preceding lifecycle")
+        try append.write(contentsOf: Data("rted\"}}\n".utf8))
+        try append.close()
+        precondition(journalReader.status(at: legacyLog).status == .running,
+                     "Finishing an appended record must invalidate the cache")
+        try lifecycle.write(to: legacyLog, atomically: false, encoding: .utf8)
+        precondition(journalReader.status(at: legacyLog).status == .completed,
+                     "In-place truncation must invalidate the cache")
+        let previousAttributes = try FileManager.default.attributesOfItem(atPath: legacyLog.path)
+        let sameLength = "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_started\"}} \n"
+        precondition(sameLength.utf8.count == lifecycle.utf8.count)
+        try sameLength.write(to: legacyLog, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: previousAttributes[.modificationDate]!],
+                                              ofItemAtPath: legacyLog.path)
+        precondition(journalReader.status(at: legacyLog).status == .running,
+                     "Same-size replacement with the same date must invalidate by file identity")
+        try FileManager.default.removeItem(at: legacyLog)
+        precondition(journalReader.status(at: legacyLog).status == .unknown,
+                     "Deleted journals must not return cached status")
+        try lifecycle.write(to: legacyLog, atomically: true, encoding: .utf8)
+        precondition(journalReader.status(at: legacyLog).status == .completed,
+                     "A recreated journal must recover after a missing-file read")
+        let longEvent = "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_failed\",\"padding\":\"" + String(repeating: "x", count: 70_000) + "\"}}\n"
+        try (lifecycle + longEvent + noise).write(to: legacyLog, atomically: true, encoding: .utf8)
+        precondition(journalReader.status(at: legacyLog).status == .failed,
+                     "A lifecycle record spanning blocks must win over earlier events")
+        let linkedLog = directory.appendingPathComponent("linked.jsonl")
+        try FileManager.default.createSymbolicLink(at: linkedLog, withDestinationURL: legacyLog)
+        precondition(journalReader.status(at: linkedLog).status == .failed)
+        try lifecycle.write(to: legacyLog, atomically: true, encoding: .utf8)
+        precondition(journalReader.status(at: linkedLog).status == .completed,
+                     "Target replacement must refresh through an unchanged symlink")
         // A paginated projection can remain on an older inProgress turn after a resume.
         let currentLog = directory.appendingPathComponent("current.jsonl")
         try (lifecycle + noise).write(to: currentLog, atomically: true, encoding: .utf8)
